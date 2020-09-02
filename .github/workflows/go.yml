@@ -34,4 +34,4 @@ jobs:
       run: make build-binary
 
     - name: Test
-      run: go test -v .
+      run: go test -v ./...
