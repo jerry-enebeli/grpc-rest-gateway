@@ -1,5 +1,7 @@
 module github.com/jerry-enebeli/grpc-rest-gateway
 
+go 1.14
+
 require (
 	github.com/golang/protobuf v1.3.4
 	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect
