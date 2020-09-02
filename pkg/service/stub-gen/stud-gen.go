@@ -1,7 +1,7 @@
 package stubgen
 
 import (
-	"fmt"
+    "fmt"
 	"github.com/jerry-enebeli/grpc-rest-gateway/tools"
 	"log"
 	"path"
