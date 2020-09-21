@@ -2,196 +2,116 @@
 
 
 # gRPC To REST
-grpc-rest is a service written in golang that enables application developers convert their Google protocol buffers files to a RESTful gateway that communicates directly to their gRPC services.
+grpc-rest gateway is a service written in golang that enables application developers convert their Google protocol buffers files to a RESTful gateway that communicates directly to their gRPC servers.
 
 # Background
 
 gRPC is a technology that enables application developer build cross language RPC functions by generate clients and server stubs for various languages. It uses protocol buffers as it's data and service definitions. Protocol buffer is a platform-neutral, extensible mechanism for serializing structured data.
 
-gRPC sounds like a promising tool but it's adoption rate is not as wide as REST or GraphQl.
+gRPC sounds like a promising tool, but it's adoption rate is not as wide as REST or GraphQl.
 
-gRPC to Rest aim to provide an easy to use proxy generator that service HTTP+JSON to your gRPC services.
+gRPC to Rest aim to provide an easy to use http gateway that service HTTP+JSON to your gRPC services.
 
-grpc to rest is a service written in Golang that converts grpc proto file to rest apis.
+gRPC to rest is a service written in Golang that converts gRPC proto file to rest apis.
 
-grpc to rest serves as a gateway between a rest client and a grpc service.
+gRPC to rest serves as a gateway between a rest client, and a gRPC service.
 
-# Manuel Steps
 
-# Google Cloud Endpoints Sample for Go using gRPC
+# Get Started
+### Install Binary
+Download pre-built binaries from https://github.com/jerry-enebeli/grpc-rest-gateway/releases or build from source.
 
-This sample demonstrates how to use Google Cloud Endpoints using Go and gRPC.
-
-## Test the code locally (optional)
-
-Run the backend using `go run`:
-
+#### Run Install Command
 ```bash
-$ go run server/main.go
+$ make install-binary
 ```
 
-Send a request from another terminal:
-
+#### Check If It Works
 ```bash
-$ go run client/main.go
-2017/03/30 17:08:32 Greeting: Hello world
+$ gateway
 ```
 
-## Deploying service config
-
-1. First, generate `out.pb` from the proto file:
-
-    ```bash
-    protoc \
-        --include_imports \
-        --include_source_info \
-        --descriptor_set_out out.pb \
-        helloworld/helloworld.proto
-    ```
-
-1. Edit `api_config.yaml`. Replace `YOUR_PROJECT_ID`:
-
-    ```yaml
-    name: hellogrpc.endpoints.YOUR_PROJECT_ID.cloud.goog
-    ```
-
-1. Deploy your service:
-
-    ```bash
-    gcloud endpoints services deploy out.pb api_config.yaml
-    ```
-1. Deploy Http transcode
-    ```bash
-     gcloud endpoints services deploy out.pb api_config.yaml api_config_http.yaml
-    ```   
-
-## Building the server's Docker container
-
-Build and tag your gRPC server, storing it in your private container registry:
-
+## Creating A Service
+Create a service from a proto file. Pass the destination of the proto file as the source flag (-s).
 ```bash
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/go-grpc-hello:1.0 .
+$ gateway service create -s hello.proto
 ```
 
-## Deploy to GCE or GKE
+## View All Services
+Get a list of all gRPC services.
+```bash
+$ gateway service list
+```
 
-### Deploy to GCE
+![List All Services](https://res.cloudinary.com/dsxddxoeg/image/upload/v1600656236/Screen_Shot_2020-09-21_at_3.43.40_AM_g4llrn.png)
 
-1. Create an instance and SSH into it:
 
-    ```bash
-    gcloud compute instances create grpc-host --image-family cos-stable --image-project cos-cloud --tags http-server,https-server
-    gcloud compute ssh grpc-host
-    ```
+## View All Methods In A Service
+Get a list of all methods in a service.
 
-1. Set some environment variables:
+```bash
+$ gateway service list-methods helloworld.greeter
+```
 
-    ```bash
-    GOOGLE_CLOUD_PROJECT=$(curl -s "http://metadata.google.internal/computeMetadata/v1/project/project-id" -H "Metadata-Flavor: Google")
-    SERVICE_NAME=hellogrpc.endpoints.${GOOGLE_CLOUD_PROJECT}.cloud.goog
-    ```
+![List Service Methods](https://res.cloudinary.com/dsxddxoeg/image/upload/v1600656503/Screen_Shot_2020-09-21_at_3.48.03_AM_kdf7zs.png)
 
-1. Pull your credentials to access your private container registry:
+## Run API Gateway for a service 
+Create a http API gateway for a gRPC service.
+* --backend is the address of the gRPC server
+* --port is the custom port for the API gateway
 
-    ```bash
-    docker-credential-gcr configure-docker
-    ```
+```bash
+$ gateway service run helloworld.greeter --backend=127.0.0.1:50051 --port=4300
+```
 
-1. Create your own container network called esp_net:
+After running the gateway for a service gateway creates a json file which serves a mapper between the gRPC method and custom http routes and method.
+It crates a [package].[service].json file e.g helloworld.greeter.json.
+```json
+{
+  "routes": [
+    {
+      "grpc_path": "/helloworld.Greeter/SayHello",
+      "method": "POST",
+      "route": "/sayhello"
+    }
+  ]
+}
+```
 
-    ```bash
-    docker network create --driver bridge esp_net
-    ```
+## Run API Gateway for a service with a mapper json file
+Create a http API gateway for a grpc service.
+* --backend is the address of the grpc server
+* --port is the custom port for the API gateway
+* -s is the gRPC to REST json file. it defines the mapping between a gRPC service methods, and a custom REST routes.
 
-1. Run your gRPC server's container:
+```bash
+$ gateway service run helloworld.greeter --backend=127.0.0.1:50051 --port=4300 -s helloworld.greeter.json
+```
+The below json is a modification of the generated json file. The json file was generated because a  gRPC to REST mapper file empty in the above command using the -s flag. The file can be named anything, does not have to following the naming convention [package].[service].json but must follow the json structure.
 
-    ```bash
-    docker run --detach --net=esp_net --name=grpc-hello gcr.io/${GOOGLE_CLOUD_PROJECT}/go-grpc-hello:1.0
-    ```
+```json
+{
+  "routes": [
+    {
+      "grpc_path": "/helloworld.Greeter/SayHello",
+      "method": "PUT",
+      "route": "/hello"
+    }
+  ]
+}
+```
 
-1. Run Endpoints proxy:
+## Register a JSON codec with the gRPC server. In Go, it can be automatically registered simple by adding the following import:
 
-    ```bash
-    docker run \
-        --detach \
-        --name=esp \
-        --publish=80:9000 \
-        --net=esp_net \
-        gcr.io/endpoints-release/endpoints-runtime:1 \
-        --service=${SERVICE_NAME} \
-        --rollout_strategy=managed \
-        --http2_port=9000 \
-        --backend=grpc://grpc-hello:50051
-    ```
+`import _ "github.com/jerry-enebeli/grpc-rest-gateway/codec"`
 
-1. On your local machine, get the IP address of your secured gRPC server:
 
-    ```bash
-    gcloud compute instances list --filter=grpc-host
-    ```
-
-1. Send a request to the API server (see "Running the client" below)
-
-### Deploy to GKE
-
-If you haven't got a cluster, first [create one](https://cloud.google.com/kubernetes-engine/docs/how-to/creating-a-container-cluster).
-
-1. Edit `deployment.yaml`. Replace `<YOUR_PROJECT_ID>`.
-
-1. Create the deployment and service:
-
-    ```
-    kubectl apply -f deployment.yaml
-    ```
-
-1. Wait until the load balancer is active:
-
-    ```
-    kubectl get svc grpc-hello --watch
-    ```
-
-1. Send a request to the API server (see "Running the client" below)
-
-## Running the client
-
-1. First, [create a project API key](https://console.developers.google.com/apis/credentials).
-
-1. Then, on your local machine, after you have your server's IP address (via
-   GKE's `kubectl get svc` or your GCE instance's IP), run:
-
-    ```bash
-    go run client/main.go --api-key=AIzaSyCfBd6lEyWRSWNY8GiI4qk3FWv1QuwUqRE --addr=35.228.175.213:80 [message]
-    ```
-
-[1]: https://cloud.google.com/endpoints/docs/quickstarts
-
-## Configuring authentication and authenticating requests
-
-### Configuring Authentication
-
-This sample shows how to make requests authenticated by a service account using a signed JWT token.
-
-1. First, [create a service account](https://console.developers.google.com/apis/credentials)
-
-1. Edit `api_config_auth.yaml`. Replace `PROJECT_ID` and `SERVICE-ACCOUNT-ID`.
-
-1. Update the service configuration using `api_config_auth.yaml` instead of `api_config.yaml`:
-
-    ```bash
-    gcloud endpoints services deploy out.pb api_config_auth.yaml
-    ```
-
-### Authenticating requests
-
-1. First, [create and download a service account key](https://console.developers.google.com/apis/credentials) in JSON format.
-
-1. Then, run:
-
-    ```bash
-    go run client/main.go \
-        --keyfile=service-key.json \
-        --audience=hellogrpc.endpoints.gateway-288303.cloud.goog \
-        --addr=35.228.175.213:80 \
-        hello
-    ```
-
+## Make a http call
+Make a http call to the defined http routes in the  gRPC to REST mapper json file. This would send a request to the gRPC server and return the appropriate response from the server.
+```bash
+curl --location --request PUT 'http://localhost:4300/hello' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "name": "jerry"
+}'
+```
