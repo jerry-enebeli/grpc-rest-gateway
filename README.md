@@ -60,8 +60,8 @@ Create a http API gateway for a gRPC service.
 $ gateway service run helloworld.greeter --backend=127.0.0.1:50051 --port=4300
 ```
 
-After running the gateway for a service gateway creates a json file which serves a mapper between the gRPC method and custom http routes and method.
-It crates a [package].[service].json file e.g helloworld.greeter.json.
+After running the gateway for a service grpc-rest-gateway creates a json file which serves a mapper between the gRPC methods and custom http routes.
+It crates a [package].[service].json file e.g helloworld.greeter.json in the current working dir.
 ```json
 {
   "routes": [
