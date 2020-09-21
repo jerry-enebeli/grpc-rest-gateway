@@ -2,14 +2,16 @@ package gateway
 
 import (
 	"fmt"
+	"log"
+	"os"
+
 	"github.com/jerry-enebeli/grpc-rest-gateway/pkg/service"
 	"github.com/jerry-enebeli/grpc-rest-gateway/tools"
 	"github.com/spf13/cobra"
-	"log"
-	"os"
 )
 
 var sourceProtoFile string
+var sourceJsonFile string
 
 var s = service.NewService()
 
@@ -19,7 +21,6 @@ var rootCmd = &cobra.Command{
 	Long:  `Gateway is a api gateway for gRPC application. gateway maps RESTFUL API to gRPC services.Complete documentation is available at https://github.com/jerry-enebeli/grpc-rest-gateway`,
 	Run: func(cmd *cobra.Command, args []string) {
 		output, _ := tools.Shell("bash", "gateway --help")
-
 		log.Println(output)
 	},
 }
@@ -28,7 +29,6 @@ var serviceCmd = &cobra.Command{
 	Use:   "service",
 	Short: "manages gRPC services",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("got this", args)
 	},
 }
 
@@ -50,6 +50,18 @@ var serviceListMethodsCmd = &cobra.Command{
 	},
 }
 
+var serviceRunCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Runs the gRPC service",
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 {
+			fmt.Println("service name required. gateway service run [service name]")
+			return
+		}
+		s.Run("", args[0], sourceJsonFile)
+	},
+}
+
 var serviceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "create new gRPC services",
@@ -59,12 +71,17 @@ var serviceCreateCmd = &cobra.Command{
 }
 
 func addServiceCreateFlags() {
-	serviceCreateCmd.Flags().StringVarP(&sourceProtoFile, "source", "s", "", "Source directory to read proto file from")
+	serviceCreateCmd.Flags().StringVarP(&sourceProtoFile, "source", "s", "", "Source directory to read the proto file from")
+}
+
+func addRunServiceFlag() {
+	serviceRunCmd.Flags().StringVarP(&sourceJsonFile, "source", "s", "", "Source directory to read the rest to rpc mapper json file from")
 }
 
 func Execute() {
 	addServiceCreateFlags()
-	serviceCmd.AddCommand(serviceCreateCmd, serviceListCmd, serviceListMethodsCmd)
+	addRunServiceFlag()
+	serviceCmd.AddCommand(serviceCreateCmd, serviceListCmd, serviceListMethodsCmd, serviceRunCmd)
 	rootCmd.AddCommand(serviceCmd)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
