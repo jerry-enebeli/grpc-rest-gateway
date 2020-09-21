@@ -31,7 +31,7 @@ type Service interface {
 	GetService(service string) (packageData, error)
 	GetServiceMethods(service string)
 	InvokeGrpcMethod(path string, in input) output
-	Run(backendIp, service, file string)
+	Run(service, backend, port, file string)
 }
 
 type RegisterData struct {
@@ -193,15 +193,15 @@ func (s *service) InvokeGrpcMethod(path string, in input) output {
 	return out
 }
 
-func (s *service) Run(backendIp, service, mapper string) {
-	s.registerService(service, mapper)
-	go s.dailGrpcClient(backendIp)
-	s.startHttpServer()
+func (s *service) Run(service, backend, port, file string) {
+	s.registerService(service, file)
+	go s.dailGrpcClient(backend)
+	s.startHttpServer(port)
 }
 
-func (s *service) dailGrpcClient(backendIp string) {
-	log.Println("connection made to gRPC server at 127.0.0.1:50051")
-	conn, err := grpc.Dial("127.0.0.1:50051", grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(codec.JSON{}.Name())))
+func (s *service) dailGrpcClient(backend string) {
+	log.Printf("connection made to gRPC server at %s", backend)
+	conn, err := grpc.Dial(backend, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(codec.JSON{}.Name())))
 	if err != nil {
 		panic(err)
 	}
@@ -209,11 +209,11 @@ func (s *service) dailGrpcClient(backendIp string) {
 
 }
 
-func (s *service) startHttpServer() {
-	log.Println("gateway started at port 4500")
+func (s *service) startHttpServer(port string) {
+	log.Printf("gateway started at port %s", port)
 	n := negroni.Classic()
 	n.UseHandler(s)
-	http.ListenAndServe(":4500", n)
+	_ = http.ListenAndServe(":"+port, n)
 }
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {

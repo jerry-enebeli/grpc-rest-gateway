@@ -12,6 +12,8 @@ import (
 
 var sourceProtoFile string
 var sourceJsonFile string
+var gRPCBackend string
+var gateWayPort string
 
 var s = service.NewService()
 
@@ -58,7 +60,7 @@ var serviceRunCmd = &cobra.Command{
 			fmt.Println("service name required. gateway service run [service name]")
 			return
 		}
-		s.Run("", args[0], sourceJsonFile)
+		s.Run(args[0], gRPCBackend, gateWayPort, sourceJsonFile)
 	},
 }
 
@@ -74,13 +76,15 @@ func addServiceCreateFlags() {
 	serviceCreateCmd.Flags().StringVarP(&sourceProtoFile, "source", "s", "", "Source directory to read the proto file from")
 }
 
-func addRunServiceFlag() {
+func addRunServiceFlags() {
 	serviceRunCmd.Flags().StringVarP(&sourceJsonFile, "source", "s", "", "Source directory to read the rest to rpc mapper json file from")
+	serviceRunCmd.Flags().StringVarP(&gRPCBackend, "backend", "-b", "", "Address to the gRPC server")
+	serviceRunCmd.Flags().StringVarP(&gateWayPort, "port", "-p", "", "Custom port for the gateway")
 }
 
 func Execute() {
 	addServiceCreateFlags()
-	addRunServiceFlag()
+	addRunServiceFlags()
 	serviceCmd.AddCommand(serviceCreateCmd, serviceListCmd, serviceListMethodsCmd, serviceRunCmd)
 	rootCmd.AddCommand(serviceCmd)
 	if err := rootCmd.Execute(); err != nil {
