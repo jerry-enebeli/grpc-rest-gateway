@@ -1,91 +1,102 @@
 /**
-Service Package takes care of managing the gRPC services gotten from the uploaded proto file.
+service Package takes care of managing the gRPC services gotten from the uploaded proto file.
 */
 
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/jerry-enebeli/grpc-rest-gateway/codec"
+	"github.com/jerry-enebeli/grpc-rest-gateway/configs/db"
 	"github.com/jerry-enebeli/proto-parser/ast"
 	"github.com/jerry-enebeli/proto-parser/parser"
 	"github.com/mitchellh/mapstructure"
+	"github.com/urfave/negroni"
 	bolt "go.etcd.io/bbolt"
-	"log"
-	"os"
-	"strings"
-	"time"
+	"google.golang.org/grpc"
 )
 
-const BUCKETNAME = "Services"
-
-type Service struct {
+type Service interface {
+	CreateService(source string) error
+	GetAllServices()
+	GetService(service string) (packageData, error)
+	GetServiceMethods(service string)
+	InvokeGrpcMethod(path string, in input) output
+	Run(backendIp, service, file string)
 }
 
-func NewService() *Service {
-	return &Service{}
+type RegisterData struct {
+	GrpcPath string `json:"grpc_path"`
+	Method   string `json:"method"`
+	Route    string `json:"route"`
 }
 
-func (s Service) db() *bolt.DB {
-	err := os.Mkdir("/usr/local/bin/gateway", 0777)
-	fmt.Println(err)
-	db, err := bolt.Open("/usr/local/bin/gateway/service.db", 0600, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_ = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte(BUCKETNAME))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		return nil
-	})
-
-	return db
+type service struct {
+	conn     *grpc.ClientConn
+	bolt     *db.BoltDB
+	register map[string]RegisterData
 }
 
-func getProtoDetails(file string) *ast.Ast {
-	tokens := parser.NewParser(file).Tokens
+type input map[string]interface{}
+type output map[string]interface{}
 
-	protoDetails := ast.NewAst(tokens)
+type packageData map[string]interface{}
 
-	protoDetails.GenerateAST()
-
-	return protoDetails
+func (p packageData) getPackageName(service string) string {
+	return strings.Split(service, ".")[0]
 }
-func (s Service) CreateService(source string) {
 
+func (p packageData) getServiceDetails() ast.Service {
+	serviceDetails := p["service_details"].(map[string]interface{})
+	var service ast.Service
+	_ = mapstructure.Decode(serviceDetails, &service)
+	return service
+}
+
+func NewService() Service {
+	boltDB := db.NewBoltDB(db.SERVICEBUCKETNAME)
+	register := make(map[string]RegisterData)
+	return &service{bolt: boltDB, register: register}
+}
+
+func (s service) CreateService(source string) error {
 	protoDetails := getProtoDetails(source)
-
 	serviceKey := strings.ToLower(protoDetails.Package + "." + protoDetails.Service.Name)
-	data := make(map[string]interface{})
-	data["created_at"] = time.Now().Format("2006-01-02 3:4:5 pm")
-	data["service_details"] = protoDetails.Service
-
+	createdAt := time.Now().Format("2006-01-02 3:4:5 pm")
+	data := input{"created_at": createdAt, "service_details": protoDetails.Service}
 	service, _ := json.Marshal(data)
 
-	db := s.db()
-	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(BUCKETNAME))
+	dbConn := s.bolt.Conn
+	err := dbConn.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(s.bolt.Bucket))
 		err := b.Put([]byte(serviceKey), service)
 		return err
 	})
 
 	if err != nil {
-		return
+		return err
 	}
 
 	fmt.Println("service created  ✓")
 
+	return nil
 }
 
-func (s Service) GetAllServices() {
-	db := s.db()
+func (s service) GetAllServices() {
+	dbConn := s.bolt.Conn
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := dbConn.View(func(tx *bolt.Tx) error {
 		// Assume bucket exists and has keys
-		b := tx.Bucket([]byte(BUCKETNAME))
+		b := tx.Bucket([]byte(s.bolt.Bucket))
 
 		c := b.Cursor()
 
@@ -112,11 +123,37 @@ func (s Service) GetAllServices() {
 
 }
 
-func (s Service) GetServiceMethods(name string) {
-	db := s.db()
-	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(BUCKETNAME))
-		v := b.Get([]byte(name))
+func (s service) GetService(service string) (packageData, error) {
+	dbConn := s.bolt.Conn
+
+	var serviceData packageData
+	err := dbConn.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(s.bolt.Bucket))
+		v := b.Get([]byte(service))
+
+		if string(v) == "" {
+			return errors.New("service not found")
+		} else {
+			data := packageData{}
+			_ = json.Unmarshal(v, &data)
+			serviceData = data
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return packageData{}, err
+	}
+
+	return serviceData, nil
+}
+
+func (s service) GetServiceMethods(service string) {
+	dbConn := s.bolt.Conn
+	err := dbConn.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(s.bolt.Bucket))
+		v := b.Get([]byte(service))
 
 		if string(v) == "" {
 			fmt.Println("service not found")
@@ -144,4 +181,133 @@ func (s Service) GetServiceMethods(name string) {
 		return
 	}
 
+}
+
+func (s *service) InvokeGrpcMethod(path string, in input) output {
+	out := output{}
+	err := s.conn.Invoke(context.Background(), path, in, &out)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	return out
+}
+
+func (s *service) Run(backendIp, service, mapper string) {
+	s.registerService(service, mapper)
+	go s.dailGrpcClient(backendIp)
+	s.startHttpServer()
+}
+
+func (s *service) dailGrpcClient(backendIp string) {
+	log.Println("connection made to gRPC server at 127.0.0.1:50051")
+	conn, err := grpc.Dial("127.0.0.1:50051", grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(codec.JSON{}.Name())))
+	if err != nil {
+		panic(err)
+	}
+	s.conn = conn
+
+}
+
+func (s *service) startHttpServer() {
+	log.Println("gateway started at port 4500")
+	n := negroni.Classic()
+	n.UseHandler(s)
+	http.ListenAndServe(":4500", n)
+}
+
+func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	data, ok := s.register[path]
+	if !ok {
+		responseJSON(w, 404, nil)
+		return
+	}
+	var in input
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	out := s.InvokeGrpcMethod(data.GrpcPath, in)
+	responseJSON(w, 200, out)
+}
+
+func (s *service) registerService(service, file string) {
+	packageData, err := s.GetService(service)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	if file == "" {
+		s.createDefaultRegister(packageData, service)
+		return
+	}
+	s.loadRegisterFromFile(file)
+}
+
+func (s *service) loadRegisterFromFile(file string) {
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	var fileData map[string][]RegisterData
+
+	_ = json.Unmarshal(data, &fileData)
+
+	registerData := fileData["routes"]
+
+	s.resetRegister()
+	for _, rd := range registerData {
+		s.register[rd.Route] = rd
+	}
+}
+
+func (s *service) createDefaultRegister(pd packageData, service string) {
+	var r []RegisterData
+	packageName := pd.getPackageName(service)
+	serviceDetails := pd.getServiceDetails()
+	s.resetRegister()
+	for _, method := range serviceDetails.Methods {
+		rpcPath := fmt.Sprintf("/%s.%s/%s", packageName, serviceDetails.Name, method.Name)
+		httpRoute := fmt.Sprintf("/%s", strings.ToLower(method.Name))
+		rd := RegisterData{
+			GrpcPath: rpcPath,
+			Method:   "POST",
+			Route:    httpRoute,
+		}
+		r = append(r, rd)
+		s.register[rd.Route] = rd
+	}
+
+	fileData := map[string][]RegisterData{"routes": r}
+
+	rJson, err := json.MarshalIndent(&fileData, "", "  ")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	_ = ioutil.WriteFile(service+".json", rJson, 0644)
+}
+
+func (s *service) resetRegister() {
+	s.register = map[string]RegisterData{}
+}
+
+func getProtoDetails(file string) *ast.Ast {
+	tokens := parser.NewParser(file).Tokens
+
+	protoDetails := ast.NewAst(tokens)
+
+	protoDetails.GenerateAST()
+
+	return protoDetails
+}
+
+func responseJSON(res http.ResponseWriter, status int, object interface{}) {
+	res.Header().Set("Content-Type", "application/json")
+	res.WriteHeader(status)
+	err := json.NewEncoder(res).Encode(object)
+
+	if err != nil {
+		return
+	}
 }
