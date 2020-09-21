@@ -10,7 +10,7 @@ install:
 
 
 build-binary:
-	go build -o ${PROJECT} -pkgdir ${PWD} -a ${PWD}/cmd/main.go
+	go build -o ${PROJECT} -pkgdir ${PWD} -a ${PWD}/cmd/gateway.go
 
 install-binary:
 	go install ${PWD}/cmd/gateway.go
