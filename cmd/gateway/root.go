@@ -78,8 +78,8 @@ func addServiceCreateFlags() {
 
 func addRunServiceFlags() {
 	serviceRunCmd.Flags().StringVarP(&sourceJsonFile, "source", "s", "", "Source directory to read the rest to rpc mapper json file from")
-	serviceRunCmd.Flags().StringVarP(&gRPCBackend, "backend", "-b", "", "Address to the gRPC server")
-	serviceRunCmd.Flags().StringVarP(&gateWayPort, "port", "-p", "", "Custom port for the gateway")
+	serviceRunCmd.Flags().StringVarP(&gRPCBackend, "backend", "b", "", "Address to the gRPC server")
+	serviceRunCmd.Flags().StringVarP(&gateWayPort, "port", "p", "", "Custom port for the gateway")
 }
 
 func Execute() {
