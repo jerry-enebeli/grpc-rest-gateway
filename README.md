@@ -10,11 +10,7 @@ gRPC is a technology that enables application developer build cross language RPC
 
 gRPC sounds like a promising tool, but it's adoption rate is not as wide as REST or GraphQl.
 
-grpc-rest-gateway aim to provide an easy to use http gateway that service HTTP+JSON to your gRPC services.
-
-grpc-rest-gateway is a service written in Golang that converts gRPC proto file to rest apis.
-
-grpc-rest-gateway serves as a gateway between a rest client, and a gRPC service.
+grpc-rest-gateway provides an easy to use http gateway that service HTTP+JSON to your gRPC services.
 
 
 # Get Started
