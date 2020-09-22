@@ -58,11 +58,12 @@ var serviceRunCmd = &cobra.Command{
 	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
-			fmt.Println("service name required. gateway service run [service name]")
+			fmt.Println("service name required. gateway service run <service name>")
 			return
 		}
 		s := service.NewService()
 		s.Run(args[0], gRPCBackend, gateWayPort, sourceJsonFile)
+
 	},
 }
 

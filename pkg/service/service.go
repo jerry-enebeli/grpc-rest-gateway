@@ -12,7 +12,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jerry-enebeli/grpc-rest-gateway/codec"
@@ -63,9 +66,8 @@ func (p packageData) getServiceDetails() ast.Service {
 }
 
 func NewService() Service {
-	boltDB := db.NewBoltDB(db.SERVICEBUCKETNAME)
 	register := make(map[string]RegisterData)
-	return &service{bolt: boltDB, register: register}
+	return &service{register: register}
 }
 
 func (s service) CreateService(source string) error {
@@ -92,11 +94,13 @@ func (s service) CreateService(source string) error {
 }
 
 func (s service) GetAllServices() {
-	dbConn := s.bolt.Conn
+	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
+
+	defer dbConn.Close()
 
 	err := dbConn.View(func(tx *bolt.Tx) error {
 		// Assume bucket exists and has keys
-		b := tx.Bucket([]byte(s.bolt.Bucket))
+		b := tx.Bucket([]byte(db.SERVICEBUCKETNAME))
 
 		c := b.Cursor()
 
@@ -121,14 +125,16 @@ func (s service) GetAllServices() {
 		return
 	}
 
+	return
 }
 
 func (s service) GetService(service string) (packageData, error) {
-	dbConn := s.bolt.Conn
+	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
 
+	defer dbConn.Close()
 	var serviceData packageData
 	err := dbConn.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(s.bolt.Bucket))
+		b := tx.Bucket([]byte(db.SERVICEBUCKETNAME))
 		v := b.Get([]byte(service))
 
 		if string(v) == "" {
@@ -150,9 +156,11 @@ func (s service) GetService(service string) (packageData, error) {
 }
 
 func (s service) GetServiceMethods(service string) {
-	dbConn := s.bolt.Conn
+	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
+
+	defer dbConn.Close()
 	err := dbConn.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(s.bolt.Bucket))
+		b := tx.Bucket([]byte(db.SERVICEBUCKETNAME))
 		v := b.Get([]byte(service))
 
 		if string(v) == "" {
@@ -181,6 +189,7 @@ func (s service) GetServiceMethods(service string) {
 		return
 	}
 
+	return
 }
 
 func (s *service) InvokeGrpcMethod(path string, in input) output {
@@ -194,26 +203,37 @@ func (s *service) InvokeGrpcMethod(path string, in input) output {
 }
 
 func (s *service) Run(service, backend, port, file string) {
+	sigs := make(chan os.Signal, 1)
+
 	s.registerService(service, file)
 	go s.dailGrpcClient(backend)
-	s.startHttpServer(port)
+	go s.startHttpServer(port)
+
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	<-sigs
 }
 
 func (s *service) dailGrpcClient(backend string) {
-	log.Printf("connection made to gRPC server at %s", backend)
+	log.Printf("creating connection to gRPC server at %s ....", backend)
 	conn, err := grpc.Dial(backend, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(codec.JSON{}.Name())))
 	if err != nil {
-		panic(err)
+		log.Println(err)
 	}
 	s.conn = conn
-
 }
 
 func (s *service) startHttpServer(port string) {
-	log.Printf("gateway started at port %s", port)
 	n := negroni.Classic()
 	n.UseHandler(s)
-	_ = http.ListenAndServe(":"+port, n)
+
+	log.Printf("starting gateway on port %s ....", port)
+
+	err := http.ListenAndServe(":"+port, n)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 }
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
