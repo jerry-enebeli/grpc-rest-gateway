@@ -15,12 +15,9 @@ var sourceJsonFile string
 var gRPCBackend string
 var gateWayPort string
 
-var s = service.NewService()
-
 var rootCmd = &cobra.Command{
-	Use:   "Gateway",
+	Use:   "gateway",
 	Short: "gRPC to REST",
-	Long:  `Gateway is a api gateway for gRPC application. gateway maps RESTFUL API to gRPC services.Complete documentation is available at https://github.com/jerry-enebeli/grpc-rest-gateway`,
 	Run: func(cmd *cobra.Command, args []string) {
 		output, _ := tools.Shell("bash", "gateway --help")
 		log.Println(output)
@@ -31,6 +28,8 @@ var serviceCmd = &cobra.Command{
 	Use:   "service",
 	Short: "manages gRPC services",
 	Run: func(cmd *cobra.Command, args []string) {
+		output, _ := tools.Shell("bash", "gateway service --help")
+		log.Println(output)
 	},
 }
 
@@ -38,28 +37,31 @@ var serviceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "list gRPC services",
 	Run: func(cmd *cobra.Command, args []string) {
+		s := service.NewService()
 		s.GetAllServices()
 	},
 }
 
 var serviceListMethodsCmd = &cobra.Command{
-	Use:       "list-methods",
-	Short:     "list gRPC services methods",
-	Example:   "Gateway service list-methods [service name]",
-	ValidArgs: []string{"test"},
+	Use:                   "list-methods <service name>",
+	Short:                 "list gRPC services methods",
+	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, args []string) {
+		s := service.NewService()
 		s.GetServiceMethods(args[0])
 	},
 }
 
 var serviceRunCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Runs the gRPC service",
+	Use:                   "run [flags...] <service name>",
+	Short:                 "Runs a gRPC service",
+	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			fmt.Println("service name required. gateway service run [service name]")
 			return
 		}
+		s := service.NewService()
 		s.Run(args[0], gRPCBackend, gateWayPort, sourceJsonFile)
 	},
 }
@@ -68,6 +70,7 @@ var serviceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "create new gRPC services",
 	Run: func(cmd *cobra.Command, args []string) {
+		s := service.NewService()
 		s.CreateService(sourceProtoFile)
 	},
 }

@@ -3,7 +3,9 @@ module github.com/jerry-enebeli/grpc-rest-gateway
 go 1.14
 
 require (
+	github.com/bojand/ghz v0.60.0 // indirect
 	github.com/golang/protobuf v1.4.2
+	github.com/google/pprof v0.0.0-20200905233945-acf8798be1f7 // indirect
 	github.com/jerry-enebeli/proto-parser v0.0.0-20200905173001-3799ff2e04ac
 	github.com/jnewmano/grpc-json-proxy v0.0.2
 	github.com/johanbrandhorst/grpc-json-example v0.0.0-20180722152311-a20c72379c60
