@@ -77,9 +77,12 @@ func (s service) CreateService(source string) error {
 	data := input{"created_at": createdAt, "service_details": protoDetails.Service}
 	service, _ := json.Marshal(data)
 
-	dbConn := s.bolt.Conn
+	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
+
+	defer dbConn.Close()
+
 	err := dbConn.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(s.bolt.Bucket))
+		b := tx.Bucket([]byte(db.SERVICEBUCKETNAME))
 		err := b.Put([]byte(serviceKey), service)
 		return err
 	})
@@ -206,7 +209,7 @@ func (s *service) Run(service, backend, port, file string) {
 	sigs := make(chan os.Signal, 1)
 
 	s.registerService(service, file)
-	go s.dailGrpcClient(backend)
+	s.dailGrpcClient(backend)
 	go s.startHttpServer(port)
 
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
