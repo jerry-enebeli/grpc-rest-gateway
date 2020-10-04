@@ -22,7 +22,6 @@ import (
 	"github.com/jerry-enebeli/grpc-rest-gateway/configs/db"
 	"github.com/jerry-enebeli/proto-parser/ast"
 	"github.com/jerry-enebeli/proto-parser/parser"
-	"github.com/mitchellh/mapstructure"
 	"github.com/urfave/negroni"
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/grpc"
@@ -31,9 +30,9 @@ import (
 type Service interface {
 	CreateService(source string) error
 	GetAllServices()
-	GetService(service string) (packageData, error)
+	GetService(service string) (serviceData, error)
 	GetServiceMethods(service string)
-	InvokeGrpcMethod(path string, in input) output
+	InvokeGrpcMethod(path string, in map[string]interface{}) map[string]interface{}
 	Run(service, backend, port, file string)
 }
 
@@ -49,20 +48,18 @@ type service struct {
 	register map[string]RegisterData
 }
 
-type input map[string]interface{}
-type output map[string]interface{}
-
-type packageData map[string]interface{}
-
-func (p packageData) getPackageName(service string) string {
-	return strings.Split(service, ".")[0]
+type serviceData struct {
+	CreatedAt      string      `json:"created_at"`
+	ServiceDetails ast.Service `json:"service_details"`
+	ServiceName    string      `json:"service_name"`
+	PackageName    string      `json:"package_name"`
 }
 
-func (p packageData) getServiceDetails() ast.Service {
-	serviceDetails := p["service_details"].(map[string]interface{})
-	var service ast.Service
-	_ = mapstructure.Decode(serviceDetails, &service)
-	return service
+func (s serviceData) getKey() string {
+	return strings.ToLower(s.PackageName + "." + s.ServiceName)
+}
+func (s *serviceData) timeStamp() {
+	s.CreatedAt = time.Now().Format("2006-01-02 3:4:5 pm")
 }
 
 func NewService() Service {
@@ -72,9 +69,15 @@ func NewService() Service {
 
 func (s service) CreateService(source string) error {
 	protoDetails := getProtoDetails(source)
-	serviceKey := strings.ToLower(protoDetails.Package + "." + protoDetails.Service.Name)
-	createdAt := time.Now().Format("2006-01-02 3:4:5 pm")
-	data := input{"created_at": createdAt, "service_details": protoDetails.Service}
+
+	data := serviceData{
+		ServiceDetails: protoDetails.Service,
+		ServiceName:    protoDetails.Service.Name,
+		PackageName:    protoDetails.Package,
+	}
+	data.timeStamp()
+	serviceKey := data.getKey()
+
 	service, _ := json.Marshal(data)
 
 	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
@@ -109,17 +112,11 @@ func (s service) GetAllServices() {
 
 		fmt.Println("NAME\t\t\t\t\tCREATED\t\t\t\tMETHODS")
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			data := make(map[string]interface{})
+			var sd serviceData
 
-			_ = json.Unmarshal(v, &data)
+			_ = json.Unmarshal(v, &sd)
 
-			createdAt := data["created_at"].(string)
-			serviceDetails := data["service_details"].(map[string]interface{})
-
-			var service ast.Service
-			_ = mapstructure.Decode(serviceDetails, &service)
-
-			fmt.Printf("%s\t\t%v\t\t\t%v\n", k, createdAt, len(service.Methods))
+			fmt.Printf("%s\t\t%v\t\t\t%v\n", k, sd.CreatedAt, len(sd.ServiceDetails.Methods))
 		}
 		return nil
 	})
@@ -131,11 +128,11 @@ func (s service) GetAllServices() {
 	return
 }
 
-func (s service) GetService(service string) (packageData, error) {
+func (s service) GetService(service string) (serviceData, error) {
 	dbConn := db.NewBoltDB(db.SERVICEBUCKETNAME).Conn
 
 	defer dbConn.Close()
-	var serviceData packageData
+	var sd serviceData
 	err := dbConn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(db.SERVICEBUCKETNAME))
 		v := b.Get([]byte(service))
@@ -143,19 +140,19 @@ func (s service) GetService(service string) (packageData, error) {
 		if string(v) == "" {
 			return errors.New("service not found")
 		} else {
-			data := packageData{}
+			data := serviceData{}
 			_ = json.Unmarshal(v, &data)
-			serviceData = data
+			sd = data
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return packageData{}, err
+		return serviceData{}, err
 	}
 
-	return serviceData, nil
+	return sd, nil
 }
 
 func (s service) GetServiceMethods(service string) {
@@ -169,18 +166,13 @@ func (s service) GetServiceMethods(service string) {
 		if string(v) == "" {
 			fmt.Println("service not found")
 		} else {
-			data := make(map[string]interface{})
+			var sd serviceData
 
-			_ = json.Unmarshal(v, &data)
-
-			serviceDetails := data["service_details"].(map[string]interface{})
-
-			var service ast.Service
-			_ = mapstructure.Decode(serviceDetails, &service)
+			_ = json.Unmarshal(v, &sd)
 
 			fmt.Println("NAME\t\t\tINPUT\t\t\t\tOUTPUT")
 
-			for _, method := range service.Methods {
+			for _, method := range sd.ServiceDetails.Methods {
 				fmt.Printf("%s\t\t\t%v\t\t\t\t%v\n", method.Name, method.InputTypeName, method.OutPutTypeName)
 			}
 		}
@@ -195,8 +187,8 @@ func (s service) GetServiceMethods(service string) {
 	return
 }
 
-func (s *service) InvokeGrpcMethod(path string, in input) output {
-	out := output{}
+func (s *service) InvokeGrpcMethod(path string, in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
 	err := s.conn.Invoke(context.Background(), path, in, &out)
 
 	if err != nil {
@@ -247,20 +239,20 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		responseJSON(w, 404, nil)
 		return
 	}
-	var in input
+	var in map[string]interface{}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	out := s.InvokeGrpcMethod(data.GrpcPath, in)
 	responseJSON(w, 200, out)
 }
 
 func (s *service) registerService(service, file string) {
-	packageData, err := s.GetService(service)
+	serviceData, err := s.GetService(service)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	if file == "" {
-		s.createDefaultRegister(packageData, service)
+		s.createDefaultRegister(serviceData, service)
 		return
 	}
 	s.loadRegisterFromFile(file)
@@ -284,13 +276,12 @@ func (s *service) loadRegisterFromFile(file string) {
 	}
 }
 
-func (s *service) createDefaultRegister(pd packageData, service string) {
+func (s *service) createDefaultRegister(sd serviceData, service string) {
 	var r []RegisterData
-	packageName := pd.getPackageName(service)
-	serviceDetails := pd.getServiceDetails()
+
 	s.resetRegister()
-	for _, method := range serviceDetails.Methods {
-		rpcPath := fmt.Sprintf("/%s.%s/%s", packageName, serviceDetails.Name, method.Name)
+	for _, method := range sd.ServiceDetails.Methods {
+		rpcPath := fmt.Sprintf("/%s.%s/%s", sd.PackageName, sd.ServiceName, method.Name)
 		httpRoute := fmt.Sprintf("/%s", strings.ToLower(method.Name))
 		rd := RegisterData{
 			GrpcPath: rpcPath,
